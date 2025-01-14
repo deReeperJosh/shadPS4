@@ -270,6 +270,9 @@ SceUsbdTransfer* PS4_SYSV_ABI sceUsbdAllocTransfer(int iso_packets) {
 s32 PS4_SYSV_ABI sceUsbdSubmitTransfer(SceUsbdTransfer* transfer) {
     LOG_INFO(Lib_Usbd, "called");
 
+    if (transfer == nullptr)
+        return 0x802400FF;
+
     LOG_INFO(Lib_Usbd, "Data to submit: \n{}", HexDump(transfer->buffer, transfer->length));
 
     return libusb_to_orbis_error(libusb_submit_transfer(transfer));
