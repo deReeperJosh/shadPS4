@@ -7,11 +7,37 @@
 #include "core/libraries/libs.h"
 #include "usbd.h"
 
+#include <fmt/format.h>
 #include <libusb.h>
 
 namespace Libraries::Usbd {
 
 namespace {
+
+std::string HexDump(const u8* data, size_t size) {
+    constexpr size_t BYTES_PER_LINE = 16;
+
+    std::string out;
+    for (size_t row_start = 0; row_start < size; row_start += BYTES_PER_LINE) {
+        out += fmt::format("{:06x}: ", row_start);
+        for (size_t i = 0; i < BYTES_PER_LINE; ++i) {
+            if (row_start + i < size) {
+                out += fmt::format("{:02x} ", data[row_start + i]);
+            } else {
+                out += "   ";
+            }
+        }
+        out += " ";
+        for (size_t i = 0; i < BYTES_PER_LINE; ++i) {
+            if (row_start + i < size) {
+                char c = static_cast<char>(data[row_start + i]);
+                out += std::isprint(c, std::locale::classic()) ? c : '.';
+            }
+        }
+        out += "\n";
+    }
+    return out;
+}
 
 s32 libusb_to_orbis_error(int err) {
     if (err == LIBUSB_ERROR_OTHER)
@@ -243,6 +269,8 @@ SceUsbdTransfer* PS4_SYSV_ABI sceUsbdAllocTransfer(int iso_packets) {
 
 s32 PS4_SYSV_ABI sceUsbdSubmitTransfer(SceUsbdTransfer* transfer) {
     LOG_INFO(Lib_Usbd, "called");
+
+    LOG_INFO(Lib_Usbd, "Data to submit: \n{}", HexDump(transfer->buffer, transfer->length));
 
     return libusb_to_orbis_error(libusb_submit_transfer(transfer));
 }
