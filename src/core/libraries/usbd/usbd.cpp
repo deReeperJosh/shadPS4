@@ -351,6 +351,8 @@ s32 PS4_SYSV_ABI sceUsbdControlTransfer(SceUsbdDeviceHandle* dev_handle, u8 requ
                                         u32 timeout) {
     LOG_INFO(Lib_Usbd, "called");
 
+    LOG_INFO(Lib_Usbd, "Control data to submit: \n{}", HexDump(data, wLength));
+
     return libusb_to_orbis_error(libusb_control_transfer(dev_handle, request_type, bRequest, wValue,
                                                          wIndex, data, wLength, timeout));
 }
