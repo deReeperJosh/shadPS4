@@ -189,7 +189,7 @@ s32 PS4_SYSV_ABI sceUsbdSetConfiguration(SceUsbdDeviceHandle* dev_handle, s32 co
 s32 PS4_SYSV_ABI sceUsbdClaimInterface(SceUsbdDeviceHandle* dev_handle, s32 interface_number) {
     LOG_INFO(Lib_Usbd, "called");
 
-    if(sceUsbdKernelDriverActive(dev_handle, interface_number)) {
+    if (sceUsbdKernelDriverActive(dev_handle, interface_number)) {
         sceUsbdDetachKernelDriver(dev_handle, interface_number);
     }
 
