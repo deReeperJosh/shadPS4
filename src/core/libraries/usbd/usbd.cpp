@@ -49,6 +49,35 @@ s32 libusb_to_orbis_error(int err) {
 }
 
 libusb_context* g_libusb_context;
+std::queue<SceUsbdTransferCallback> g_transferCallbacks = {};
+std::queue<std::array<u8, 64>> g_responses = {};
+u8 g_interruptCounter = 0;
+
+
+
+void TransferCallback(SceUsbdTransfer* transfer) {
+    LOG_INFO(Lib_Usbd, "Callback transfer? responses length: {}", g_responses.size());
+
+    SceUsbdTransferCallback callback = g_transferCallbacks.front();
+    g_transferCallbacks.pop();
+    if (g_responses.empty()) {
+        std::array<u8, 64> interrupt_response = {0x53, 0x00, 0x00, 0x00, 0x00, g_interruptCounter++,
+                                                 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                 0x00, 0x00};
+        memcpy(transfer->buffer, interrupt_response.data(), transfer->length);
+        transfer->actual_length = transfer->length;
+    } else {
+        std::array<u8, 64> interrupt_response = g_responses.front();
+        g_responses.pop();
+        memcpy(transfer->buffer, interrupt_response.data(), transfer->length);
+        transfer->actual_length = transfer->length;
+    }
+    LOG_INFO(Lib_Usbd, "Callback Transfer returning: \n{}", HexDump(transfer->buffer, transfer->actual_length));
+    callback(transfer);
+}
 
 } // namespace
 
@@ -189,6 +218,12 @@ s32 PS4_SYSV_ABI sceUsbdSetConfiguration(SceUsbdDeviceHandle* dev_handle, s32 co
 s32 PS4_SYSV_ABI sceUsbdClaimInterface(SceUsbdDeviceHandle* dev_handle, s32 interface_number) {
     LOG_INFO(Lib_Usbd, "called");
 
+    int ret = libusb_detach_kernel_driver(dev_handle, interface_number);
+
+    if (ret != LIBUSB_SUCCESS) {
+        return libusb_to_orbis_error(ret);
+    }
+
     return libusb_to_orbis_error(libusb_claim_interface(dev_handle, interface_number));
 }
 
@@ -275,7 +310,11 @@ s32 PS4_SYSV_ABI sceUsbdSubmitTransfer(SceUsbdTransfer* transfer) {
 
     LOG_INFO(Lib_Usbd, "Data to submit: \n{}", HexDump(transfer->buffer, transfer->length));
 
-    return libusb_to_orbis_error(libusb_submit_transfer(transfer));
+    int ret = libusb_submit_transfer(transfer);
+
+    LOG_INFO(Lib_Usbd, "Submit transfer returned: {}", libusb_error_name(ret));
+
+    return libusb_to_orbis_error(ret);
 }
 
 s32 PS4_SYSV_ABI sceUsbdCancelTransfer(SceUsbdTransfer* transfer) {
@@ -316,8 +355,10 @@ void PS4_SYSV_ABI sceUsbdFillInterruptTransfer(SceUsbdTransfer* transfer,
                                                u32 timeout) {
     LOG_INFO(Lib_Usbd, "called");
 
-    libusb_fill_interrupt_transfer(transfer, dev_handle, endpoint, buffer, length, callback,
-                                   user_data, timeout);
+    g_transferCallbacks.push(callback);
+
+    libusb_fill_interrupt_transfer(transfer, dev_handle, endpoint, buffer, length, TransferCallback,
+                                   user_data, 20);
 }
 
 void PS4_SYSV_ABI sceUsbdFillIsoTransfer(SceUsbdTransfer* transfer, SceUsbdDeviceHandle* dev_handle,
@@ -345,10 +386,45 @@ u8* PS4_SYSV_ABI sceUsbdGetIsoPacketBuffer(SceUsbdTransfer* transfer, u32 packet
 s32 PS4_SYSV_ABI sceUsbdControlTransfer(SceUsbdDeviceHandle* dev_handle, u8 request_type,
                                         u8 bRequest, u16 wValue, u16 wIndex, u8* data, s32 wLength,
                                         u32 timeout) {
-    LOG_INFO(Lib_Usbd, "called");
+    LOG_INFO(Lib_Usbd, "Control Transfer called, data: \n{}", HexDump(data, wLength));
 
-    return libusb_to_orbis_error(libusb_control_transfer(dev_handle, request_type, bRequest, wValue,
-                                                         wIndex, data, wLength, timeout));
+    int ret = libusb_control_transfer(dev_handle, request_type, bRequest, wValue, wIndex, data,
+                                      wLength, timeout);
+
+    LOG_INFO(Lib_Usbd, "Control Transfer returned: \n{}", libusb_error_name(ret));
+
+    if (bRequest == 0x09 && request_type == 0x21) {
+        std::array<u8, 64> interrupt_response = {};
+        switch (data[0]) {
+        case 'A': {
+            interrupt_response = {0x41, data[1], 0xFF, 0x77, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00,    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00,    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00,    0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            g_responses.push(interrupt_response);
+            break;
+        }
+        case 'J': {
+            interrupt_response = {data[0]};
+            g_responses.push(interrupt_response);
+            break;
+        }
+        case 'M': {
+            interrupt_response = {data[0], data[1], 0x00, 0x19};
+            g_responses.push(interrupt_response);
+            break;
+        }
+        case 'R': {
+            interrupt_response = {0x52, 0x02, 0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            g_responses.push(interrupt_response);
+            break;
+        }
+        }
+    }
+
+    return libusb_to_orbis_error(wLength);
 }
 
 s32 PS4_SYSV_ABI sceUsbdBulkTransfer(SceUsbdDeviceHandle* dev_handle, u8 endpoint, u8* data,
