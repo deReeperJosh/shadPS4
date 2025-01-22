@@ -6,6 +6,8 @@
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
 #include "usbd.h"
+#include "usbd_host.h"
+#include "usbd_device.h"
 
 #include <fmt/format.h>
 #include <libusb.h>
@@ -48,26 +50,24 @@ s32 libusb_to_orbis_error(int err) {
     return ORBIS_OK;
 }
 
-libusb_context* g_libusb_context;
-
 } // namespace
 
 s32 PS4_SYSV_ABI sceUsbdInit() {
     LOG_INFO(Lib_Usbd, "called");
 
-    return libusb_to_orbis_error(libusb_init(&g_libusb_context));
+    return libusb_to_orbis_error(g_usbd_host.init());
 }
 
 void PS4_SYSV_ABI sceUsbdExit() {
     LOG_INFO(Lib_Usbd, "called");
 
-    libusb_exit(g_libusb_context);
+    g_usbd_host.exit();
 }
 
-s64 PS4_SYSV_ABI sceUsbdGetDeviceList(SceUsbdDevice*** list) {
+s64 PS4_SYSV_ABI sceUsbdGetDeviceList(std::vector<std::shared_ptr<usbd_device>> devices) {
     LOG_INFO(Lib_Usbd, "called");
 
-    s64 cnt = libusb_get_device_list(g_libusb_context, list);
+    s64 cnt = g_usbd_host.get_devices(devices);
     if (cnt >= 0)
         return cnt;
 
