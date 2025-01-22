@@ -55,7 +55,7 @@ libusb_context* g_libusb_context;
 s32 PS4_SYSV_ABI sceUsbdInit() {
     LOG_INFO(Lib_Usbd, "called");
 
-    return libusb_to_orbis_error(libusb_init_context(&g_libusb_context, nullptr, 0));
+    return libusb_to_orbis_error(libusb_init(&g_libusb_context));
 }
 
 void PS4_SYSV_ABI sceUsbdExit() {
